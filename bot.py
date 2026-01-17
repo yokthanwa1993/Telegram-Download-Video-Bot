@@ -118,6 +118,51 @@ def get_video_dimensions(video_path: str) -> tuple[int, int] | tuple[None, None]
     return None, None
 
 
+def is_telegram_compatible(video_path: str) -> bool:
+    """Check if video is H.264 MP4 (Telegram compatible)."""
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+             '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', video_path],
+            capture_output=True, text=True, timeout=10
+        )
+        codec = result.stdout.strip().lower()
+        is_mp4 = video_path.lower().endswith('.mp4')
+        return codec == 'h264' and is_mp4
+    except Exception:
+        return False
+
+
+async def convert_to_mp4(input_path: str, output_dir: Path) -> str | None:
+    """Convert video to MP4 H.264 for Telegram compatibility."""
+    output_path = str(output_dir / "converted.mp4")
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            'ffmpeg', '-i', input_path,
+            '-c:v', 'libx264',      # H.264 video codec
+            '-preset', 'fast',       # Faster encoding
+            '-crf', '23',            # Quality (lower = better, 23 is default)
+            '-c:a', 'aac',           # AAC audio codec
+            '-b:a', '128k',          # Audio bitrate
+            '-movflags', '+faststart',  # Enable streaming
+            '-y',                    # Overwrite output
+            output_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(process.communicate(), timeout=600)
+
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            # Remove original file
+            os.remove(input_path)
+            return output_path
+    except Exception as e:
+        print(f"FFmpeg conversion error: {e}")
+
+    return None
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming messages with URLs."""
     text = update.message.text
@@ -149,6 +194,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Download video
         video_path = await download_video(url, DOWNLOAD_DIR)
+
+        if video_path and os.path.exists(video_path):
+            # Check if conversion needed
+            if not is_telegram_compatible(video_path):
+                try:
+                    await status_msg.edit_text("🔄 กำลังแปลงวิดีโอ...\n⏱ เวลา: " + format_time(time.time() - start_time))
+                except Exception:
+                    pass
+
+                converted_path = await convert_to_mp4(video_path, DOWNLOAD_DIR)
+                if converted_path:
+                    video_path = converted_path
 
         # Stop updater
         stop_event.set()
