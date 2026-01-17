@@ -1,0 +1,2 @@
+python-telegram-bot>=20.0
+videofetch>=0.5.0
