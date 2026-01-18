@@ -130,7 +130,49 @@ async def merge_video_audio(video_path: str, audio_path: str, output_dir: Path) 
     return None
 
 
-async def download_video(url: str, download_dir: Path) -> str | None:
+def should_use_ytdlp(url: str) -> bool:
+    """Check if URL should use yt-dlp (better for these sites)."""
+    ytdlp_domains = [
+        'facebook.com', 'fb.watch', 'fb.com',
+        'youtube.com', 'youtu.be',
+        'twitter.com', 'x.com',
+        'instagram.com',
+        'vimeo.com',
+        'dailymotion.com',
+        'twitch.tv',
+    ]
+    url_lower = url.lower()
+    return any(domain in url_lower for domain in ytdlp_domains)
+
+
+async def download_with_ytdlp(url: str, download_dir: Path) -> str | None:
+    """Download video using yt-dlp (better for Facebook, YouTube, etc.)."""
+    output_template = str(download_dir / "%(title).50s.%(ext)s")
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "yt-dlp",
+            "-f", "best[ext=mp4]/best",  # Prefer mp4, or best available
+            "--merge-output-format", "mp4",  # Merge to mp4
+            "-o", output_template,
+            "--no-playlist",
+            "--socket-timeout", "30",
+            url,
+            cwd=str(download_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+        print(f"yt-dlp stdout: {stdout.decode()[:500]}")
+        print(f"yt-dlp stderr: {stderr.decode()[:500]}")
+    except Exception as e:
+        print(f"yt-dlp error: {e}")
+        return None
+
+    return find_video_file(download_dir)
+
+
+async def download_with_videodl(url: str, download_dir: Path) -> str | None:
     """Download video using videodl CLI."""
     try:
         process = await asyncio.create_subprocess_exec(
@@ -144,19 +186,34 @@ async def download_video(url: str, download_dir: Path) -> str | None:
         print(f"videodl error: {e}")
         return None
 
-    # Find downloaded video file
-    video_path = None
+    return find_video_file(download_dir)
+
+
+def find_video_file(download_dir: Path) -> str | None:
+    """Find downloaded video file."""
     video_files = list(download_dir.rglob("*.mp4"))
     if video_files:
-        video_path = str(video_files[0])
-    else:
-        for ext in ["*.mkv", "*.webm", "*.avi", "*.mov"]:
-            video_files = list(download_dir.rglob(ext))
-            if video_files:
-                video_path = str(video_files[0])
-                break
+        return str(video_files[0])
 
-    return video_path
+    for ext in ["*.mkv", "*.webm", "*.avi", "*.mov"]:
+        video_files = list(download_dir.rglob(ext))
+        if video_files:
+            return str(video_files[0])
+
+    return None
+
+
+async def download_video(url: str, download_dir: Path) -> str | None:
+    """Download video using best available method."""
+    if should_use_ytdlp(url):
+        # Try yt-dlp first for supported sites
+        result = await download_with_ytdlp(url, download_dir)
+        if result:
+            return result
+        # Fall back to videodl if yt-dlp fails
+        print("yt-dlp failed, trying videodl...")
+
+    return await download_with_videodl(url, download_dir)
 
 
 def get_video_dimensions(video_path: str) -> tuple[int, int] | tuple[None, None]:
