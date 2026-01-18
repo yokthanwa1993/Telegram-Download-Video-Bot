@@ -25,6 +25,36 @@ app = FastAPI(title="Video Downloader")
 DOWNLOAD_DIR = Path(__file__).parent / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
+# Supported video platforms
+SUPPORTED_DOMAINS = [
+    # TikTok
+    'tiktok.com', 'vm.tiktok.com',
+    # Douyin
+    'douyin.com', 'iesdouyin.com', 'v.douyin.com',
+    # Xiaohongshu
+    'xiaohongshu.com', 'xhslink.com',
+    # YouTube
+    'youtube.com', 'youtu.be', 'youtube.com/shorts',
+    # Bilibili
+    'bilibili.com', 'b23.tv',
+    # Weibo
+    'weibo.com', 'weibo.cn',
+    # Facebook
+    'facebook.com', 'fb.watch', 'fb.com',
+    # Twitter/X
+    'twitter.com', 'x.com',
+    # Instagram
+    'instagram.com',
+    # Others
+    'vimeo.com', 'dailymotion.com', 'twitch.tv',
+]
+
+
+def is_supported_url(url: str) -> bool:
+    """Check if URL is from a supported video platform."""
+    url_lower = url.lower()
+    return any(domain in url_lower for domain in SUPPORTED_DOMAINS)
+
 # Store download tasks
 downloads = {}
 
@@ -441,6 +471,10 @@ async def start_download(request: DownloadRequest, background_tasks: BackgroundT
     url = extract_url(request.url)
     if not url:
         return {"error": "ไม่พบลิงก์ในข้อความ"}
+
+    # Check if URL is supported
+    if not is_supported_url(url):
+        return {"error": "ลิงก์นี้ไม่รองรับ รองรับเฉพาะ TikTok, Douyin, Xiaohongshu, YouTube, Bilibili, Weibo, Facebook, Instagram, Twitter/X"}
 
     task_id = str(uuid.uuid4())[:8]
     downloads[task_id] = {

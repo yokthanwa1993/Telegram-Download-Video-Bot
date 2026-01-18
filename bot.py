@@ -33,6 +33,36 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 # URL pattern
 URL_PATTERN = re.compile(r'https?://[^\s]+')
 
+# Supported video platforms
+SUPPORTED_DOMAINS = [
+    # TikTok
+    'tiktok.com', 'vm.tiktok.com',
+    # Douyin
+    'douyin.com', 'iesdouyin.com', 'v.douyin.com',
+    # Xiaohongshu
+    'xiaohongshu.com', 'xhslink.com',
+    # YouTube
+    'youtube.com', 'youtu.be', 'youtube.com/shorts',
+    # Bilibili
+    'bilibili.com', 'b23.tv',
+    # Weibo
+    'weibo.com', 'weibo.cn',
+    # Facebook
+    'facebook.com', 'fb.watch', 'fb.com',
+    # Twitter/X
+    'twitter.com', 'x.com',
+    # Instagram
+    'instagram.com',
+    # Others
+    'vimeo.com', 'dailymotion.com', 'twitch.tv',
+]
+
+
+def is_supported_url(url: str) -> bool:
+    """Check if URL is from a supported video platform."""
+    url_lower = url.lower()
+    return any(domain in url_lower for domain in SUPPORTED_DOMAINS)
+
 
 def format_time(seconds: float) -> str:
     """Format seconds to readable time."""
@@ -329,6 +359,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     url = urls[0]
+
+    # Check if URL is supported
+    if not is_supported_url(url):
+        await update.message.reply_text(
+            "❌ ลิงก์นี้ไม่รองรับ\n\n"
+            "รองรับเฉพาะ:\n"
+            "• TikTok, Douyin\n"
+            "• Xiaohongshu (小红书)\n"
+            "• YouTube\n"
+            "• Bilibili\n"
+            "• Weibo\n"
+            "• Facebook, Instagram\n"
+            "• Twitter/X"
+        )
+        return
 
     # Clean download directory
     for f in DOWNLOAD_DIR.glob("*"):
