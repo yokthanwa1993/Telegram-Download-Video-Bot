@@ -43,6 +43,23 @@ def extract_url(text: str) -> str | None:
     return None
 
 
+def get_video_dimensions(video_path: str) -> tuple[int, int] | tuple[None, None]:
+    """Get video dimensions using ffprobe."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+             '-show_entries', 'stream=width,height', '-of', 'csv=p=0', video_path],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.stdout.strip():
+            dims = result.stdout.strip().split(',')
+            return int(dims[0]), int(dims[1])
+    except Exception:
+        pass
+    return None, None
+
+
 def is_xiaohongshu_url(url: str) -> bool:
     """Check if URL is from Xiaohongshu."""
     xhs_domains = ['xiaohongshu.com', 'xhslink.com']
@@ -102,10 +119,13 @@ async def download_video(url: str, task_id: str):
 
         if video_path and os.path.exists(video_path):
             file_size = os.path.getsize(video_path)
+            width, height = get_video_dimensions(video_path)
             downloads[task_id]["status"] = "completed"
             downloads[task_id]["file_path"] = video_path
             downloads[task_id]["file_name"] = os.path.basename(video_path)
             downloads[task_id]["file_size"] = file_size
+            downloads[task_id]["width"] = width
+            downloads[task_id]["height"] = height
         else:
             downloads[task_id]["status"] = "failed"
             downloads[task_id]["error"] = "ไม่สามารถดาวน์โหลดวิดีโอได้"
@@ -313,6 +333,17 @@ async def home():
             // Sanitize filename for display
             const safeFileName = data.file_name.replace(/[<>&"']/g, '');
 
+            // Determine video orientation and size display
+            const width = data.width || 0;
+            const height = data.height || 0;
+            const isPortrait = height > width;
+            const resolution = width && height ? width + 'x' + height : '';
+
+            // Set max height based on orientation
+            const videoClass = isPortrait
+                ? 'rounded-xl max-h-72 shadow-lg'
+                : 'rounded-xl max-h-56 max-w-full shadow-lg';
+
             contentEl.innerHTML = `
                 <div class="bg-green-50 border border-green-200 rounded-xl p-4 slide-up">
                     <div class="flex items-center gap-3 mb-4">
@@ -323,13 +354,13 @@ async def home():
                         </div>
                         <div>
                             <p class="font-medium text-green-800">ดาวน์โหลดสำเร็จ!</p>
-                            <p class="text-sm text-green-600">${safeFileName} (${sizeInMB} MB)</p>
+                            <p class="text-sm text-green-600">${sizeInMB} MB ${resolution ? '• ' + resolution : ''}</p>
                         </div>
                     </div>
                     <!-- Video Preview -->
                     <div class="mb-4 flex justify-center">
                         <video
-                            class="rounded-xl max-h-80 max-w-full shadow-lg"
+                            class="${videoClass}"
                             controls
                             playsinline
                             preload="metadata"
