@@ -15,6 +15,14 @@ from pathlib import Path
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
+# Import XHS downloader
+try:
+    from xhs_downloader import download_xhs_content, resolve_short_url
+    XHS_AVAILABLE = True
+except ImportError:
+    XHS_AVAILABLE = False
+    print("Warning: xhs_downloader not available, Xiaohongshu downloads will use fallback")
+
 # Bot Token - Set via environment variable
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
@@ -130,6 +138,13 @@ async def merge_video_audio(video_path: str, audio_path: str, output_dir: Path) 
     return None
 
 
+def is_xiaohongshu_url(url: str) -> bool:
+    """Check if URL is from Xiaohongshu."""
+    xhs_domains = ['xiaohongshu.com', 'xhslink.com']
+    url_lower = url.lower()
+    return any(domain in url_lower for domain in xhs_domains)
+
+
 def should_use_ytdlp(url: str) -> bool:
     """Check if URL should use yt-dlp (better for these sites)."""
     ytdlp_domains = [
@@ -203,8 +218,32 @@ def find_video_file(download_dir: Path) -> str | None:
     return None
 
 
+async def download_with_xhs(url: str, download_dir: Path) -> str | None:
+    """Download video using Xiaohongshu downloader with Playwright."""
+    if not XHS_AVAILABLE:
+        return None
+
+    try:
+        result = await download_xhs_content(url, download_dir)
+        if result:
+            if isinstance(result, list):
+                # Multiple images - return first one for now
+                return str(result[0]) if result else None
+            return str(result)
+    except Exception as e:
+        print(f"XHS downloader error: {e}")
+    return None
+
+
 async def download_video(url: str, download_dir: Path) -> str | None:
     """Download video using best available method."""
+    # Try Xiaohongshu downloader first for XHS URLs
+    if is_xiaohongshu_url(url) and XHS_AVAILABLE:
+        result = await download_with_xhs(url, download_dir)
+        if result:
+            return result
+        print("XHS downloader failed, trying videodl...")
+
     if should_use_ytdlp(url):
         # Try yt-dlp first for supported sites
         result = await download_with_ytdlp(url, download_dir)
