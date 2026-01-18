@@ -327,9 +327,9 @@ async def home():
                         </div>
                     </div>
                     <!-- Video Preview -->
-                    <div class="mb-4 rounded-lg overflow-hidden bg-black">
+                    <div class="mb-4 flex justify-center">
                         <video
-                            class="w-full max-h-64 object-contain"
+                            class="rounded-xl max-h-80 max-w-full shadow-lg"
                             controls
                             playsinline
                             preload="metadata"
