@@ -36,9 +36,13 @@ RUN playwright install chromium
 # Copy application code
 COPY bot.py .
 COPY xhs_downloader.py .
+COPY web_app.py .
 
 # Create downloads directory
 RUN mkdir -p /app/downloads
 
-# Run the bot
-CMD ["python", "bot.py"]
+# Expose port
+EXPOSE 80
+
+# Run the web app
+CMD ["python", "-m", "uvicorn", "web_app:app", "--host", "0.0.0.0", "--port", "80"]
