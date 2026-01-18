@@ -37,6 +37,7 @@ RUN playwright install chromium
 COPY bot.py .
 COPY xhs_downloader.py .
 COPY web_app.py .
+COPY start.py .
 
 # Create downloads directory
 RUN mkdir -p /app/downloads
@@ -44,5 +45,5 @@ RUN mkdir -p /app/downloads
 # Expose port
 EXPOSE 80
 
-# Run the web app
-CMD ["python", "-m", "uvicorn", "web_app:app", "--host", "0.0.0.0", "--port", "80"]
+# Run both web app and telegram bot
+CMD ["python", "start.py"]
