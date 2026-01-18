@@ -164,14 +164,17 @@ async def download_with_ytdlp(url: str, download_dir: Path) -> str | None:
     """Download video using yt-dlp (better for Facebook, YouTube, etc.)."""
     output_template = str(download_dir / "%(title).50s.%(ext)s")
 
+    # Use format 18 (360p mp4) or 22 (720p mp4) which have audio built-in
+    # This avoids issues with YouTube's SABR streaming
     try:
         process = await asyncio.create_subprocess_exec(
             "yt-dlp",
-            "-f", "best[ext=mp4]/best",  # Prefer mp4, or best available
-            "--merge-output-format", "mp4",  # Merge to mp4
+            "-f", "22/18/best[ext=mp4]/best",  # 720p mp4 > 360p mp4 > best mp4 > best
+            "--merge-output-format", "mp4",
             "-o", output_template,
             "--no-playlist",
             "--socket-timeout", "30",
+            "--retries", "3",
             url,
             cwd=str(download_dir),
             stdout=asyncio.subprocess.PIPE,
