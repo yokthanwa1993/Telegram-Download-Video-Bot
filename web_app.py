@@ -2,13 +2,14 @@
 """Web interface for video downloader."""
 
 import os
+import re
 import asyncio
 import shutil
 import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 # Import downloaders
@@ -30,6 +31,16 @@ downloads = {}
 
 class DownloadRequest(BaseModel):
     url: str
+
+
+def extract_url(text: str) -> str | None:
+    """Extract URL from text that may contain extra content."""
+    # Pattern to match URLs
+    url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+    urls = re.findall(url_pattern, text)
+    if urls:
+        return urls[0]
+    return None
 
 
 def is_xiaohongshu_url(url: str) -> bool:
@@ -223,10 +234,19 @@ async def home():
         let currentTaskId = null;
         let pollInterval = null;
 
+        function extractUrl(text) {
+            // Extract URL from text that may contain extra content
+            const urlPattern = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/g;
+            const urls = text.match(urlPattern);
+            return urls ? urls[0] : text;
+        }
+
         async function pasteFromClipboard() {
             try {
                 const text = await navigator.clipboard.readText();
-                document.getElementById('urlInput').value = text;
+                // Extract just the URL from pasted text
+                const url = extractUrl(text);
+                document.getElementById('urlInput').value = url;
             } catch (err) {
                 console.log('Cannot paste from clipboard');
             }
@@ -290,25 +310,42 @@ async def home():
             const sizeInMB = (data.file_size / (1024 * 1024)).toFixed(2);
             const statusEl = document.getElementById('status');
             const contentEl = document.getElementById('statusContent');
+            // Sanitize filename for display
+            const safeFileName = data.file_name.replace(/[<>&"']/g, '');
 
             contentEl.innerHTML = `
                 <div class="bg-green-50 border border-green-200 rounded-xl p-4 slide-up">
-                    <div class="flex items-center gap-3 mb-3">
-                        <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
                             <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                             </svg>
                         </div>
                         <div>
                             <p class="font-medium text-green-800">ดาวน์โหลดสำเร็จ!</p>
-                            <p class="text-sm text-green-600">${data.file_name} (${sizeInMB} MB)</p>
+                            <p class="text-sm text-green-600">${safeFileName} (${sizeInMB} MB)</p>
                         </div>
+                    </div>
+                    <!-- Video Preview -->
+                    <div class="mb-4 rounded-lg overflow-hidden bg-black">
+                        <video
+                            class="w-full max-h-64 object-contain"
+                            controls
+                            playsinline
+                            preload="metadata"
+                            src="/api/preview/${currentTaskId}"
+                        >
+                            Your browser does not support video playback.
+                        </video>
                     </div>
                     <a
                         href="/api/file/${currentTaskId}"
-                        download="${data.file_name}"
+                        download="${safeFileName}"
                         class="block w-full py-3 bg-green-500 text-white text-center font-semibold rounded-lg hover:bg-green-600 transition-colors"
                     >
+                        <svg class="inline w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
                         บันทึกวิดีโอ
                     </a>
                 </div>
@@ -365,16 +402,21 @@ async def start_download(request: DownloadRequest, background_tasks: BackgroundT
 
     cleanup_old_downloads()
 
+    # Extract URL from text (handles pasted text with extra content)
+    url = extract_url(request.url)
+    if not url:
+        return {"error": "ไม่พบลิงก์ในข้อความ"}
+
     task_id = str(uuid.uuid4())[:8]
     downloads[task_id] = {
         "status": "pending",
-        "url": request.url,
+        "url": url,
         "created_at": time.time()
     }
 
-    background_tasks.add_task(download_video, request.url, task_id)
+    background_tasks.add_task(download_video, url, task_id)
 
-    return {"task_id": task_id}
+    return {"task_id": task_id, "extracted_url": url}
 
 
 @app.get("/api/status/{task_id}")
@@ -404,6 +446,27 @@ async def get_file(task_id: str):
         file_path,
         media_type="video/mp4",
         filename=task["file_name"]
+    )
+
+
+@app.get("/api/preview/{task_id}")
+async def get_preview(task_id: str):
+    """Stream video for preview."""
+    if task_id not in downloads:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    task = downloads[task_id]
+    if task["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Download not ready")
+
+    file_path = task["file_path"]
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(
+        file_path,
+        media_type="video/mp4",
+        headers={"Accept-Ranges": "bytes"}
     )
 
 
