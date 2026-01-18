@@ -66,26 +66,23 @@ async def get_xhs_video_url(url: str, cookies: list = None) -> dict | None:
 
         # Intercept network requests for video URLs
         async def handle_response(response):
-            url = response.url
-            if "sns-video" in url and ".mp4" in url:
-                if url not in result["video_urls"]:
-                    result["video_urls"].append(url)
-            elif "sns-webpic" in url or "sns-img" in url:
-                if ".jpg" in url or ".png" in url or ".webp" in url:
-                    if url not in result["image_urls"]:
-                        result["image_urls"].append(url)
+            resp_url = response.url
+            if "sns-video" in resp_url and ".mp4" in resp_url:
+                if resp_url not in result["video_urls"]:
+                    result["video_urls"].append(resp_url)
+            elif "sns-webpic" in resp_url or "sns-img" in resp_url:
+                if ".jpg" in resp_url or ".png" in resp_url or ".webp" in resp_url:
+                    if resp_url not in result["image_urls"]:
+                        result["image_urls"].append(resp_url)
 
         page.on("response", handle_response)
 
         try:
-            # First resolve short URL if needed
-            if "xhslink.com" in url:
-                full_url = await resolve_short_url(url, cookies)
-                if full_url:
-                    url = full_url
+            # Navigate to URL (short URLs will auto-redirect)
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(5)  # Wait for video to load
+            # Wait for video to load and network requests to complete
+            await asyncio.sleep(5)
 
             # Try to get title
             try:
