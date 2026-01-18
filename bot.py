@@ -75,6 +75,61 @@ async def update_elapsed_time(status_msg, start_time: float, stop_event: asyncio
         await asyncio.sleep(0.8)
 
 
+def find_audio_file(download_dir: Path) -> str | None:
+    """Find downloaded audio file."""
+    for ext in ["*.m4a", "*.mp3", "*.aac", "*.wav", "*.opus", "*.ogg"]:
+        audio_files = list(download_dir.rglob(ext))
+        if audio_files:
+            return str(audio_files[0])
+    return None
+
+
+def video_has_audio(video_path: str) -> bool:
+    """Check if video file has audio stream."""
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-select_streams', 'a',
+             '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', video_path],
+            capture_output=True, text=True, timeout=10
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+async def merge_video_audio(video_path: str, audio_path: str, output_dir: Path) -> str | None:
+    """Merge separate video and audio files."""
+    output_path = str(output_dir / "merged.mp4")
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            'ffmpeg',
+            '-i', video_path,
+            '-i', audio_path,
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-movflags', '+faststart',
+            '-y',
+            output_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(process.communicate(), timeout=600)
+
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            # Remove original files
+            os.remove(video_path)
+            os.remove(audio_path)
+            return output_path
+    except Exception as e:
+        print(f"FFmpeg merge error: {e}")
+
+    return None
+
+
 async def download_video(url: str, download_dir: Path) -> str | None:
     """Download video using videodl CLI."""
     try:
@@ -89,17 +144,19 @@ async def download_video(url: str, download_dir: Path) -> str | None:
         print(f"videodl error: {e}")
         return None
 
-    # Find downloaded file
+    # Find downloaded video file
+    video_path = None
     video_files = list(download_dir.rglob("*.mp4"))
     if video_files:
-        return str(video_files[0])
+        video_path = str(video_files[0])
+    else:
+        for ext in ["*.mkv", "*.webm", "*.avi", "*.mov"]:
+            video_files = list(download_dir.rglob(ext))
+            if video_files:
+                video_path = str(video_files[0])
+                break
 
-    for ext in ["*.mkv", "*.webm", "*.avi", "*.mov"]:
-        video_files = list(download_dir.rglob(ext))
-        if video_files:
-            return str(video_files[0])
-
-    return None
+    return video_path
 
 
 def get_video_dimensions(video_path: str) -> tuple[int, int] | tuple[None, None]:
@@ -196,8 +253,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         video_path = await download_video(url, DOWNLOAD_DIR)
 
         if video_path and os.path.exists(video_path):
-            # Check if conversion needed
-            if not is_telegram_compatible(video_path):
+            # Check if there's a separate audio file to merge
+            audio_path = find_audio_file(DOWNLOAD_DIR)
+
+            if audio_path and not video_has_audio(video_path):
+                # Video has no audio, merge with separate audio file
+                try:
+                    await status_msg.edit_text("🔊 กำลังรวมเสียง...\n⏱ เวลา: " + format_time(time.time() - start_time))
+                except Exception:
+                    pass
+
+                merged_path = await merge_video_audio(video_path, audio_path, DOWNLOAD_DIR)
+                if merged_path:
+                    video_path = merged_path
+            elif not is_telegram_compatible(video_path):
+                # Check if conversion needed
                 try:
                     await status_msg.edit_text("🔄 กำลังแปลงวิดีโอ...\n⏱ เวลา: " + format_time(time.time() - start_time))
                 except Exception:
